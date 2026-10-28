@@ -7,7 +7,6 @@ type Product = {
   model_id: number;
   code: string;
   name: string;
-  fabric: string | null;
   variant_id: number | null;
   color: string | null;
   size: string | null;
@@ -17,9 +16,7 @@ type Product = {
 };
 
 const emptyForm = {
-  code: "",
   name: "",
-  fabric: "",
   color: "",
   size: "",
   purchasePrice: "",
@@ -52,6 +49,7 @@ export default function ProductsPage() {
       }
 
       setProducts(result.products);
+      setError("");
     } catch {
       setError("دریافت فهرست کالاها ناموفق بود. اتصال برنامه را بررسی کن.");
     } finally {
@@ -63,10 +61,7 @@ export default function ProductsPage() {
     void loadProducts();
   }, [loadProducts]);
 
-  function updateField(
-    field: keyof typeof emptyForm,
-    value: string,
-  ) {
+  function updateField(field: keyof typeof emptyForm, value: string) {
     setForm((previous) => ({ ...previous, [field]: value }));
   }
 
@@ -81,7 +76,9 @@ export default function ProductsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...form,
+          name: form.name.trim(),
+          color: form.color.trim(),
+          size: form.size.trim(),
           purchasePrice: Number(form.purchasePrice),
           salePrice: Number(form.salePrice),
           stock: Number(form.stock),
@@ -94,7 +91,9 @@ export default function ProductsPage() {
         throw new Error(result.message || "ثبت کالا ناموفق بود.");
       }
 
-      setMessage("کالا با موفقیت ثبت شد.");
+      setMessage(
+        `کالا با موفقیت ثبت شد. کد مدل جدید: ${result.code}`,
+      );
       setForm(emptyForm);
       await loadProducts();
     } catch (err) {
@@ -106,6 +105,10 @@ export default function ProductsPage() {
     }
   }
 
+  const modelCount = new Set(
+    products.map((product) => product.model_id),
+  ).size;
+
   return (
     <main className="products-page" dir="rtl">
       <header className="products-header">
@@ -114,15 +117,13 @@ export default function ProductsPage() {
             ← بازگشت به داشبورد
           </a>
           <h1>کالاها و انبار</h1>
-          <p>ثبت مدل‌های پوشاک، مشخصات، قیمت‌ها و موجودی انبار</p>
+          <p>ثبت مدل‌های پوشاک، قیمت‌ها و موجودی انبار</p>
         </div>
 
         <div className="products-count">
           <span>تعداد مدل‌ها</span>
           <strong>
-            {new Intl.NumberFormat("fa-IR").format(
-              new Set(products.map((product) => product.model_id)).size,
-            )}
+            {new Intl.NumberFormat("fa-IR").format(modelCount)}
           </strong>
         </div>
       </header>
@@ -132,23 +133,13 @@ export default function ProductsPage() {
           <div>
             <h2>ثبت کالای جدید</h2>
             <p>
-              برای هر مدل، رنگ و سایز را جداگانه ثبت کن.
+              کد مدل به‌صورت خودکار تولید می‌شود. وارد کردن رنگ و سایز
+              اختیاری است.
             </p>
           </div>
         </div>
 
         <form className="product-form" onSubmit={handleSubmit}>
-          <label>
-            کد مدل *
-            <input
-              value={form.code}
-              onChange={(event) => updateField("code", event.target.value)}
-              placeholder="مثلاً S-100"
-              required
-              maxLength={80}
-            />
-          </label>
-
           <label>
             نام مدل *
             <input
@@ -161,33 +152,21 @@ export default function ProductsPage() {
           </label>
 
           <label>
-            جنس پارچه
-            <input
-              value={form.fabric}
-              onChange={(event) => updateField("fabric", event.target.value)}
-              placeholder="مثلاً لینن"
-              maxLength={150}
-            />
-          </label>
-
-          <label>
-            رنگ *
+            رنگ (اختیاری)
             <input
               value={form.color}
               onChange={(event) => updateField("color", event.target.value)}
               placeholder="مثلاً مشکی"
-              required
               maxLength={80}
             />
           </label>
 
           <label>
-            سایز *
+            سایز (اختیاری)
             <input
               value={form.size}
               onChange={(event) => updateField("size", event.target.value)}
               placeholder="مثلاً ۳۸ یا فری‌سایز"
-              required
               maxLength={50}
             />
           </label>
@@ -273,7 +252,6 @@ export default function ProductsPage() {
                 <tr>
                   <th>کد مدل</th>
                   <th>نام مدل</th>
-                  <th>پارچه</th>
                   <th>رنگ</th>
                   <th>سایز</th>
                   <th>قیمت خرید</th>
@@ -288,7 +266,6 @@ export default function ProductsPage() {
                   >
                     <td>{product.code}</td>
                     <td>{product.name}</td>
-                    <td>{product.fabric || "—"}</td>
                     <td>{product.color || "—"}</td>
                     <td>{product.size || "—"}</td>
                     <td>{money(product.purchase_price)}</td>

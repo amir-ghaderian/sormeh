@@ -10,6 +10,40 @@ function validAmount(value: unknown): number | null {
     : null;
 }
 
+type ModelRow = {
+  id: number;
+  code: string;
+  name: string;
+};
+
+function generateModelCode(): string {
+  const rows = db
+    .prepare("SELECT code FROM product_models WHERE code LIKE 'S-%'")
+    .all() as { code: string }[];
+
+  let maxNumber = 0;
+
+  for (const row of rows) {
+    const match = /^S-(\d+)$/.exec(row.code);
+
+    if (match) {
+      maxNumber = Math.max(maxNumber, Number(match[1]));
+    }
+  }
+
+  let nextNumber = maxNumber + 1;
+  let code = `S-${String(nextNumber).padStart(3, "0")}`;
+
+  while (
+    db.prepare("SELECT 1 FROM product_models WHERE code = ?").get(code)
+  ) {
+    nextNumber += 1;
+    code = `S-${String(nextNumber).padStart(3, "0")}`;
+  }
+
+  return code;
+}
+
 export async function GET() {
   try {
     const products = db
@@ -18,7 +52,6 @@ export async function GET() {
           pm.id AS model_id,
           pm.code,
           pm.name,
-          pm.fabric,
           pv.id AS variant_id,
           pv.color,
           pv.size,
@@ -46,9 +79,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    const code = String(body.code ?? "").trim();
     const name = String(body.name ?? "").trim();
-    const fabric = String(body.fabric ?? "").trim();
     const color = String(body.color ?? "").trim();
     const size = String(body.size ?? "").trim();
 
@@ -56,9 +87,9 @@ export async function POST(request: Request) {
     const salePrice = validAmount(body.salePrice);
     const stock = validAmount(body.stock);
 
-    if (!code || !name || !color || !size) {
+    if (!name) {
       return NextResponse.json(
-        { success: false, message: "کد، نام، رنگ و سایز الزامی هستند." },
+        { success: false, message: "نام مدل الزامی است." },
         { status: 400 },
       );
     }
@@ -69,44 +100,32 @@ export async function POST(request: Request) {
       stock === null
     ) {
       return NextResponse.json(
-        { success: false, message: "قیمت‌ها و تعداد باید عدد صحیح و غیرمنفی باشند." },
+        {
+          success: false,
+          message: "قیمت‌ها و تعداد باید عدد صحیح و غیرمنفی باشند.",
+        },
         { status: 400 },
       );
     }
 
     const saveProduct = db.transaction(() => {
-      let model = db
-        .prepare("SELECT id, name, fabric FROM product_models WHERE code = ?")
-        .get(code) as
-        | { id: number; name: string; fabric: string | null }
-        | undefined;
+      const code = generateModelCode();
 
-      if (!model) {
-        const result = db
-          .prepare(`
-            INSERT INTO product_models (code, name, fabric)
-            VALUES (?, ?, ?)
-          `)
-          .run(code, name, fabric || null);
+      const result = db
+        .prepare(`
+          INSERT INTO product_models (code, name, fabric)
+          VALUES (?, ?, NULL)
+        `)
+        .run(code, name);
 
-        model = {
-          id: Number(result.lastInsertRowid),
-          name,
-          fabric: fabric || null,
-        };
-      } else if (
-        model.name !== name ||
-        (model.fabric ?? "") !== fabric
-      ) {
-        throw new Error("MODEL_DETAILS_MISMATCH");
-      }
+      const modelId = Number(result.lastInsertRowid);
 
       db.prepare(`
         INSERT INTO product_variants
           (model_id, color, size, purchase_price, sale_price, stock)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(
-        model.id,
+        modelId,
         color,
         size,
         purchasePrice,
@@ -114,42 +133,21 @@ export async function POST(request: Request) {
         stock,
       );
 
-      return model.id;
+      return { modelId, code };
     });
 
-    const modelId = saveProduct();
+    const saved = saveProduct.immediate();
 
     return NextResponse.json(
       {
         success: true,
         message: "کالا با موفقیت ثبت شد.",
-        modelId,
+        modelId: saved.modelId,
+        code: saved.code,
       },
       { status: 201 },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-
-    if (message === "MODEL_DETAILS_MISMATCH") {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "این کد قبلاً برای مدلی با نام یا پارچهٔ متفاوت ثبت شده است.",
-        },
-        { status: 409 },
-      );
-    }
-
-    if (message.includes("UNIQUE constraint failed")) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "این ترکیب رنگ و سایز قبلاً برای این مدل ثبت شده است.",
-        },
-        { status: 409 },
-      );
-    }
-
     console.error("Product creation failed:", error);
 
     return NextResponse.json(
