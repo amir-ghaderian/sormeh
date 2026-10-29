@@ -30,6 +30,7 @@ const money = (value: number | null | undefined) =>
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState(emptyForm);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -65,6 +66,34 @@ export default function ProductsPage() {
     setForm((previous) => ({ ...previous, [field]: value }));
   }
 
+  function startEditing(product: Product) {
+    if (product.variant_id === null) {
+      setError("برای این کالا تنوع قابل ویرایش وجود ندارد.");
+      return;
+    }
+
+    setEditingProduct(product);
+    setForm({
+      name: product.name,
+      color: product.color ?? "",
+      size: product.size ?? "",
+      purchasePrice: String(product.purchase_price ?? 0),
+      salePrice: String(product.sale_price ?? 0),
+      stock: String(product.stock ?? 0),
+    });
+    setMessage("");
+    setError("");
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEditing() {
+    setEditingProduct(null);
+    setForm(emptyForm);
+    setMessage("");
+    setError("");
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
@@ -72,10 +101,18 @@ export default function ProductsPage() {
     setSaving(true);
 
     try {
+      const isEditing = editingProduct !== null;
+
       const response = await fetch("/api/products", {
-        method: "POST",
+        method: isEditing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(isEditing
+            ? {
+                modelId: editingProduct.model_id,
+                variantId: editingProduct.variant_id,
+              }
+            : {}),
           name: form.name.trim(),
           color: form.color.trim(),
           size: form.size.trim(),
@@ -88,17 +125,25 @@ export default function ProductsPage() {
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.message || "ثبت کالا ناموفق بود.");
+        throw new Error(result.message || "ذخیرهٔ اطلاعات ناموفق بود.");
       }
 
-      setMessage(
-        `کالا با موفقیت ثبت شد. کد مدل جدید: ${result.code}`,
-      );
+      if (isEditing) {
+        setMessage(
+          `اطلاعات «${form.name.trim()}» با موفقیت اصلاح شد.`,
+        );
+      } else {
+        setMessage(
+          `کالا با موفقیت ثبت شد. کد مدل جدید: ${result.code}`,
+        );
+      }
+
+      setEditingProduct(null);
       setForm(emptyForm);
       await loadProducts();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "ثبت کالا ناموفق بود.",
+        err instanceof Error ? err.message : "ذخیرهٔ اطلاعات ناموفق بود.",
       );
     } finally {
       setSaving(false);
@@ -131,15 +176,23 @@ export default function ProductsPage() {
       <section className="products-panel">
         <div className="products-panel-heading">
           <div>
-            <h2>ثبت کالای جدید</h2>
+            <h2>{editingProduct ? "ویرایش کالا" : "ثبت کالای جدید"}</h2>
             <p>
-              کد مدل به‌صورت خودکار تولید می‌شود. وارد کردن رنگ و سایز
-              اختیاری است.
+              {editingProduct
+                ? `کد مدل ${editingProduct.code} حفظ می‌شود. تغییرات را ذخیره کن.`
+                : "کد مدل به‌صورت خودکار تولید می‌شود. رنگ و سایز اختیاری هستند."}
             </p>
           </div>
         </div>
 
         <form className="product-form" onSubmit={handleSubmit}>
+          {editingProduct && (
+            <label>
+              کد مدل
+              <input value={editingProduct.code} readOnly />
+            </label>
+          )}
+
           <label>
             نام مدل *
             <input
@@ -200,7 +253,7 @@ export default function ProductsPage() {
           </label>
 
           <label>
-            موجودی اولیه (عدد) *
+            موجودی {editingProduct ? "فعلی" : "اولیه"} (عدد) *
             <input
               type="number"
               min="0"
@@ -213,8 +266,23 @@ export default function ProductsPage() {
 
           <div className="product-form-actions">
             <button type="submit" disabled={saving}>
-              {saving ? "در حال ثبت..." : "ثبت کالا"}
+              {saving
+                ? "در حال ذخیره..."
+                : editingProduct
+                  ? "ذخیرهٔ تغییرات"
+                  : "ثبت کالا"}
             </button>
+
+            {editingProduct && (
+              <button
+                type="button"
+                className="refresh-button"
+                onClick={cancelEditing}
+                disabled={saving}
+              >
+                انصراف
+              </button>
+            )}
           </div>
         </form>
 
@@ -226,7 +294,7 @@ export default function ProductsPage() {
         <div className="products-panel-heading">
           <div>
             <h2>فهرست کالاهای انبار</h2>
-            <p>مشاهده مدل‌ها، رنگ‌ها، سایزها و تعداد موجود</p>
+            <p>برای اصلاح مشخصات یا موجودی، روی «ویرایش» بزن.</p>
           </div>
 
           <button
@@ -257,6 +325,7 @@ export default function ProductsPage() {
                   <th>قیمت خرید</th>
                   <th>قیمت فروش</th>
                   <th>موجودی</th>
+                  <th>عملیات</th>
                 </tr>
               </thead>
               <tbody>
@@ -282,6 +351,16 @@ export default function ProductsPage() {
                           product.stock ?? 0,
                         )}
                       </span>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="refresh-button"
+                        onClick={() => startEditing(product)}
+                        disabled={product.variant_id === null || saving}
+                      >
+                        ویرایش
+                      </button>
                     </td>
                   </tr>
                 ))}

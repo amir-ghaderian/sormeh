@@ -3,18 +3,20 @@ import { NextResponse } from "next/server";
 import db from "@/lib/db";
 
 function validAmount(value: unknown): number | null {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
   const number = Number(value);
 
   return Number.isSafeInteger(number) && number >= 0
     ? number
     : null;
 }
-
-type ModelRow = {
-  id: number;
-  code: string;
-  name: string;
-};
 
 function generateModelCode(): string {
   const rows = db
@@ -152,6 +154,121 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       { success: false, message: "ثبت کالا انجام نشد." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+
+    const modelId = Number(body.modelId);
+    const variantId = Number(body.variantId);
+    const name = String(body.name ?? "").trim();
+    const color = String(body.color ?? "").trim();
+    const size = String(body.size ?? "").trim();
+
+    const purchasePrice = validAmount(body.purchasePrice);
+    const salePrice = validAmount(body.salePrice);
+    const stock = validAmount(body.stock);
+
+    if (
+      !Number.isSafeInteger(modelId) ||
+      modelId <= 0 ||
+      !Number.isSafeInteger(variantId) ||
+      variantId <= 0
+    ) {
+      return NextResponse.json(
+        { success: false, message: "شناسهٔ کالا معتبر نیست." },
+        { status: 400 },
+      );
+    }
+
+    if (!name) {
+      return NextResponse.json(
+        { success: false, message: "نام مدل الزامی است." },
+        { status: 400 },
+      );
+    }
+
+    if (
+      purchasePrice === null ||
+      salePrice === null ||
+      stock === null
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "قیمت‌ها و تعداد باید عدد صحیح و غیرمنفی باشند.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const updateProduct = db.transaction(() => {
+      const model = db
+        .prepare("SELECT id FROM product_models WHERE id = ?")
+        .get(modelId);
+
+      const variant = db
+        .prepare(`
+          SELECT id
+          FROM product_variants
+          WHERE id = ? AND model_id = ?
+        `)
+        .get(variantId, modelId);
+
+      if (!model || !variant) {
+        return false;
+      }
+
+      db.prepare(`
+        UPDATE product_models
+        SET name = ?
+        WHERE id = ?
+      `).run(name, modelId);
+
+      db.prepare(`
+        UPDATE product_variants
+        SET
+          color = ?,
+          size = ?,
+          purchase_price = ?,
+          sale_price = ?,
+          stock = ?
+        WHERE id = ? AND model_id = ?
+      `).run(
+        color,
+        size,
+        purchasePrice,
+        salePrice,
+        stock,
+        variantId,
+        modelId,
+      );
+
+      return true;
+    });
+
+    const updated = updateProduct.immediate();
+
+    if (!updated) {
+      return NextResponse.json(
+        { success: false, message: "کالای موردنظر پیدا نشد." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "اطلاعات کالا با موفقیت اصلاح شد.",
+    });
+  } catch (error) {
+    console.error("Product update failed:", error);
+
+    return NextResponse.json(
+      { success: false, message: "اصلاح اطلاعات کالا انجام نشد." },
       { status: 500 },
     );
   }
